@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Drop Count</title>
+<style>
+:root{--bg:#10201f;--panel:#17302e;--fg:#f1ead8;--mut:#8fa9a3;--brass:#d9a441;--ok:#7fd1a0}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;background:var(--bg);color:var(--fg);font:16px/1.4 Georgia,"Iowan Old Style",serif;display:flex;flex-wrap:wrap;gap:24px;justify-content:center;align-items:flex-start;padding:20px}
+h1{font-size:2rem;margin:0 0 4px;letter-spacing:-.01em}
+.sub{color:var(--mut);margin:0 0 14px}
+canvas{background:var(--panel);border-radius:10px;max-width:100%;display:block}
+aside{width:300px;max-width:100%}
+.row{display:flex;gap:8px;margin:10px 0}
+input,select,button{font:inherit;padding:9px 10px;border-radius:6px;border:1px solid #2f504b;background:#0c1a19;color:var(--fg);min-width:0}
+input{flex:1}
+button{background:var(--brass);color:#2a1d04;border:0;font-weight:700;cursor:pointer}
+button:disabled{opacity:.4;cursor:default}
+:focus-visible{outline:2px solid var(--ok);outline-offset:2px}
+#res{min-height:3.2em;font-size:1.1rem}
+.score{font-size:2.6rem;font-weight:700;color:var(--brass);line-height:1}
+ol{padding-left:22px;color:var(--mut);margin:6px 0}
+ol b{color:var(--fg)}
+</style></head><body>
+<main>
+  <h1>Drop Count</h1>
+  <p class="sub">Watch the marbles fall into the bin. Guess how many.</p>
+  <canvas id="c" width="360" height="460" aria-label="Marbles falling into a bin"></canvas>
+</main>
+<aside>
+  <div class="row"><input id="name" placeholder="Your name" maxlength="16" aria-label="Your name">
+    <select id="lvl" aria-label="Difficulty"><option value="1">Easy</option><option value="2">Medium</option><option value="3">Hard</option></select></div>
+  <button id="go" style="width:100%">Start round</button>
+  <div id="gbox" hidden>
+    <div class="row"><input id="gi" type="number" min="0" inputmode="numeric" placeholder="How many dropped?" aria-label="Your guess"><button id="gb">Guess</button></div>
+  </div>
+  <p id="res" aria-live="polite"></p>
+  <div class="score" id="tot">0</div><div class="sub">your total points</div>
+  <h3>Top players</h3><ol id="lb"></ol>
+</aside>
+<script>
+const $=id=>document.getElementById(id), cv=$('c'), g=cv.getContext('2d');
+const W=360,H=460,LIP=370, cols=['#e9c46a','#f4845f','#7bc6e6','#e76f8b','#90be6d','#b497f5'];
+let round=null,t0=0,busy=false;
+function drawBin(){
+  g.fillStyle='#0a1514';g.fillRect(36,LIP,288,H-LIP-14);
+  g.strokeStyle='#d9a441';g.lineWidth=5;g.lineJoin='round';
+  g.beginPath();g.moveTo(30,LIP-8);g.lineTo(36,H-14);g.lineTo(324,H-14);g.lineTo(330,LIP-8);g.stroke();
+}
+function loop(now){
+  g.clearRect(0,0,W,H);
+  let done=0;
+  for(const [t,d,x,c] of round.drops){
+    const p=(now-t0-t)/d;
+    if(p>=1){done++;continue}
+    if(p>=0){g.fillStyle=cols[c];g.beginPath();g.arc(44+x*2.72,-10+p*(LIP+10),9,0,7);g.fill();}
+  }
+  drawBin();
+  if(done===round.drops.length){$('gbox').hidden=false;$('gi').value='';$('gi').focus();return;}
+  requestAnimationFrame(loop);
+}
+async function start(){
+  if(busy)return; busy=true; $('go').disabled=true; $('gbox').hidden=true; $('res').textContent='Watch closely…';
+  round=await (await fetch('/api/round?level='+$('lvl').value)).json();
+  t0=performance.now()+400; requestAnimationFrame(loop);
+}
+async function guess(){
+  const v=parseInt($('gi').value); if(isNaN(v)||v<0)return;
+  $('gb').disabled=true;
+  const r=await fetch(`/api/guess?round=${round.id}&guess=${v}&name=${encodeURIComponent($('name').value)}`,{method:'POST'});
+  const j=await r.json(); $('gb').disabled=false;
+  if(j.error){$('res').textContent=j.error;return}
+  $('gbox').hidden=true;
+  $('res').textContent=`${j.actual} dropped. You said ${v}: +${j.points} points${v===j.actual?' (exact!)':''}.`;
+  $('tot').textContent=j.total; $('go').textContent='Next round'; $('go').disabled=false; busy=false;
+  board();
+}
+async function board(){
+  const l=await (await fetch('/api/leaderboard')).json();
+  $('lb').innerHTML=l.map(e=>`<li><b>${e.name}</b> ${e.total}</li>`).join('')||'<li>No scores yet</li>';
+}
+$('go').onclick=start; $('gb').onclick=guess; $('gi').onkeydown=e=>{if(e.key==='Enter')guess()};
+g.clearRect(0,0,W,H);drawBin();board();
+</script></body></html>
